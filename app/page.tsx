@@ -11,7 +11,7 @@ export default function Home() {
         <StatusBar />
         <div className="flex flex-1 relative">
           <ClientWrapper>
-            <div className="absolute inset-0">
+            <div className="w-full h-full" style={{ position: 'absolute', inset: 0, minHeight: '500px' }}>
               <NetworkGlobe />
             </div>
           </ClientWrapper>

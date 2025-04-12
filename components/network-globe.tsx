@@ -6,378 +6,347 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
 
 // Define regions with their coordinates and names
 const REGIONS = [
-  { name: "North America", lat: 40, lng: -100, connections: [1, 2, 3], color: 0x00ff88 },
-  { name: "Europe", lat: 50, lng: 10, connections: [0, 2, 4], color: 0x00ff88 },
-  { name: "Asia", lat: 35, lng: 105, connections: [1, 3, 4], color: 0x00ff88 },
-  { name: "South America", lat: -15, lng: -55, connections: [0, 2, 4], color: 0x00ff88 },
-  { name: "Australia", lat: -25, lng: 135, connections: [1, 2, 3], color: 0x00ff88 }
+  { name: "North America", lat: 40, lng: -100, color: 0x00ff88 },
+  { name: "Europe", lat: 50, lng: 10, color: 0x00ff88 },
+  { name: "Asia", lat: 35, lng: 105, color: 0x00ff88 },
+  { name: "South America", lat: -15, lng: -55, color: 0x00ff88 },
+  { name: "Australia", lat: -25, lng: 135, color: 0x00ff88 }
 ]
 
-// Generate random nodes within each region
+// Generate 5 nodes per region
 const generateNodesForRegion = (region: typeof REGIONS[0], count: number) => {
-  const nodes = []
+  const nodes = [];
   for (let i = 0; i < count; i++) {
-    const latOffset = (Math.random() - 0.5) * 20
-    const lngOffset = (Math.random() - 0.5) * 20
+    const latOffset = (Math.random() - 0.5) * 20;
+    const lngOffset = (Math.random() - 0.5) * 20;
     nodes.push({
       lat: region.lat + latOffset,
       lng: region.lng + lngOffset,
-      color: 0x00ff88
-    })
+      color: 0x00ff88,
+      regionIndex: REGIONS.indexOf(region)
+    });
   }
-  return nodes
-}
+  return nodes;
+};
 
-const ALL_NODES = REGIONS.flatMap(region => generateNodesForRegion(region, 10))
+const ALL_NODES = REGIONS.flatMap(region => generateNodesForRegion(region, 5));
 
 export default function NetworkGlobe() {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [hoveredRegion, setHoveredRegion] = useState<{ name: string; position: THREE.Vector3 } | null>(null)
-  const [isInitialized, setIsInitialized] = useState(false)
-  const [nodeStates, setNodeStates] = useState(ALL_NODES.map(() => ({ color: 0x00ff88 })))
-  const [selectedRegion, setSelectedRegion] = useState<number | null>(null)
-  const controlsRef = useRef<OrbitControls | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hoveredRegion, setHoveredRegion] = useState<{ name: string; position: THREE.Vector3 } | null>(null);
+  const [badNode, setBadNode] = useState<number | null>(null);
+
+  // Convert lat/lng to 3D coordinates
+  const latLngToVector3 = (lat: number, lng: number, radius: number) => {
+    const phi = (90 - lat) * (Math.PI / 180);
+    const theta = (lng + 180) * (Math.PI / 180);
+    const x = -(radius * Math.sin(phi) * Math.cos(theta));
+    const z = radius * Math.sin(phi) * Math.sin(theta);
+    const y = radius * Math.cos(phi);
+    return new THREE.Vector3(x, y, z);
+  };
 
   useEffect(() => {
-    if (!containerRef.current || isInitialized) return
+    if (!containerRef.current) return;
 
-    const container = containerRef.current
+    // Basic Three.js setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 5);
 
-    // Scene setup
-    const scene = new THREE.Scene()
-    scene.fog = new THREE.FogExp2(0x000000, 0.00003)
-
-    // Camera setup
-    const camera = new THREE.PerspectiveCamera(
-      60,
-      container.clientWidth / container.clientHeight,
-      0.1,
-      10000
-    )
-    camera.position.z = 5
-
-    // Renderer setup with post-processing
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-    })
-    renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.setSize(container.clientWidth, container.clientHeight)
-    renderer.setClearColor(0x000000, 1)
-    container.appendChild(renderer.domElement)
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    renderer.setClearColor(0x000000);
+    containerRef.current.appendChild(renderer.domElement);
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0x0a192f, 0.2)
-    scene.add(ambientLight)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    directionalLight.position.set(1, 1, 1);
+    scene.add(directionalLight);
 
-    const directionalLight = new THREE.DirectionalLight(0x00ff88, 0.5)
-    directionalLight.position.set(5, 3, 5)
-    scene.add(directionalLight)
-
-    // Earth creation
-    const earthGeometry = new THREE.SphereGeometry(2, 64, 64)
+    // Earth
+    const earthGeometry = new THREE.SphereGeometry(2, 32, 32);
     const earthMaterial = new THREE.MeshPhongMaterial({
       color: 0x0a192f,
       emissive: 0x0a192f,
       emissiveIntensity: 0.2,
       shininess: 25,
-      transparent: true,
-      opacity: 0.9,
-    })
-    const earth = new THREE.Mesh(earthGeometry, earthMaterial)
-    scene.add(earth)
-
-    // Region highlighting
-    const regionHighlightMaterials = REGIONS.map(() => {
-      const material = new THREE.MeshBasicMaterial({
-        color: 0x00ff88,
-        transparent: true,
-        opacity: 0,
-        side: THREE.BackSide,
-      })
-      const geometry = new THREE.SphereGeometry(2.02, 32, 32)
-      const mesh = new THREE.Mesh(geometry, material)
-      scene.add(mesh)
-      return { material, mesh }
-    })
+    });
+    const earth = new THREE.Mesh(earthGeometry, earthMaterial);
+    scene.add(earth);
 
     // Grid overlay
-    const gridGeometry = new THREE.SphereGeometry(2.01, 32, 32)
+    const gridGeometry = new THREE.SphereGeometry(2.01, 32, 32);
     const gridMaterial = new THREE.MeshBasicMaterial({
       color: 0x00ff88,
       wireframe: true,
       transparent: true,
       opacity: 0.1,
-    })
-    const grid = new THREE.Mesh(gridGeometry, gridMaterial)
-    scene.add(grid)
+    });
+    const grid = new THREE.Mesh(gridGeometry, gridMaterial);
+    scene.add(grid);
 
-    // Atmosphere glow
-    const glowGeometry = new THREE.SphereGeometry(2.1, 64, 64)
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff88,
-      transparent: true,
-      opacity: 0.1,
-    })
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial)
-    scene.add(glow)
-
-    // Create nodes for each region
-    const nodeObjects: THREE.Mesh[] = []
-    const nodeGeometry = new THREE.SphereGeometry(0.03, 16, 16)
+    // Region markers
+    const regionMarkers: THREE.Mesh[] = [];
+    const regionMeshes: THREE.Mesh[] = [];
     
-    // Create nodes and connections
-    const connectionMaterial = new THREE.LineBasicMaterial({
-      color: 0x00ff88,
-      transparent: true,
-      opacity: 0.2,
-    })
+    REGIONS.forEach((region, index) => {
+      // Create region highlight
+      const regionGeometry = new THREE.SphereGeometry(2.03, 32, 32);
+      const regionMaterial = new THREE.MeshBasicMaterial({
+        color: region.color,
+        transparent: true,
+        opacity: 0,
+        side: THREE.BackSide
+      });
+      const regionMesh = new THREE.Mesh(regionGeometry, regionMaterial);
+      scene.add(regionMesh);
+      regionMeshes.push(regionMesh);
+      
+      // Add region marker
+      const markerGeometry = new THREE.SphereGeometry(0.08, 16, 16);
+      const markerMaterial = new THREE.MeshPhongMaterial({
+        color: region.color,
+        emissive: region.color,
+        emissiveIntensity: 0.5
+      });
+      const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+      marker.position.copy(latLngToVector3(region.lat, region.lng, 2));
+      marker.userData = { regionIndex: index };
+      scene.add(marker);
+      regionMarkers.push(marker);
+    });
 
+    // Create nodes
+    const nodes: THREE.Mesh[] = [];
     ALL_NODES.forEach((node, index) => {
-      const position = latLngToVector3(node.lat, node.lng, 2)
+      const nodeGeometry = new THREE.SphereGeometry(0.03, 16, 16);
       const nodeMaterial = new THREE.MeshPhongMaterial({
         color: node.color,
         emissive: node.color,
-        emissiveIntensity: 0.5,
-      })
-      const nodeMesh = new THREE.Mesh(nodeGeometry, nodeMaterial)
-      nodeMesh.position.copy(position)
-      nodeMesh.userData = { nodeIndex: index }
-      nodeObjects.push(nodeMesh)
-      scene.add(nodeMesh)
-    })
+        emissiveIntensity: 0.5
+      });
+      const nodeMesh = new THREE.Mesh(nodeGeometry, nodeMaterial);
+      nodeMesh.position.copy(latLngToVector3(node.lat, node.lng, 2));
+      nodeMesh.userData = { nodeIndex: index, regionIndex: node.regionIndex };
+      scene.add(nodeMesh);
+      nodes.push(nodeMesh);
+    });
 
     // Create ripple effect
     const createRipple = (position: THREE.Vector3) => {
-      const rippleGeometry = new THREE.RingGeometry(0, 0.2, 32)
+      const rippleGeometry = new THREE.RingGeometry(0, 0.2, 32);
       const rippleMaterial = new THREE.MeshBasicMaterial({
         color: 0xff0000,
         transparent: true,
         opacity: 1,
         side: THREE.DoubleSide,
-      })
-      const ripple = new THREE.Mesh(rippleGeometry, rippleMaterial)
-      ripple.position.copy(position)
-      ripple.lookAt(new THREE.Vector3(0, 0, 0))
-      scene.add(ripple)
+      });
+      const ripple = new THREE.Mesh(rippleGeometry, rippleMaterial);
+      ripple.position.copy(position);
+      ripple.lookAt(new THREE.Vector3(0, 0, 0));
+      scene.add(ripple);
 
-      const startTime = Date.now()
-      const animate = () => {
-        const elapsed = Date.now() - startTime
-        const duration = 1000 // 1 second animation
+      const startTime = Date.now();
+      function expandRipple() {
+        const elapsed = Date.now() - startTime;
+        const duration = 2000;
+        
         if (elapsed < duration) {
-          const scale = elapsed / duration * 2
-          ripple.scale.set(scale, scale, scale)
-          rippleMaterial.opacity = 1 - (elapsed / duration)
-          requestAnimationFrame(animate)
+          const scale = elapsed / duration * 3;
+          ripple.scale.set(scale, scale, scale);
+          rippleMaterial.opacity = 1 - (elapsed / duration);
+          requestAnimationFrame(expandRipple);
         } else {
-          scene.remove(ripple)
-          ripple.geometry.dispose()
-          rippleMaterial.dispose()
+          scene.remove(ripple);
+          rippleGeometry.dispose();
+          rippleMaterial.dispose();
         }
       }
-      animate()
-    }
+      
+      expandRipple();
+    };
 
     // Simulate bad nodes
-    const simulateBadNodes = () => {
-      const randomIndex = Math.floor(Math.random() * ALL_NODES.length)
-      setNodeStates(prevStates => {
-        const newStates = [...prevStates]
-        newStates[randomIndex] = { color: 0xff0000 }
-        const position = nodeObjects[randomIndex].position.clone()
-        createRipple(position)
-        return newStates
-      })
-
-      // Reset after 2 seconds
-      setTimeout(() => {
-        setNodeStates(prevStates => {
-          const newStates = [...prevStates]
-          newStates[randomIndex] = { color: 0x00ff88 }
-          return newStates
-        })
-      }, 2000)
-    }
-
-    // Start simulation
-    const simulationInterval = setInterval(simulateBadNodes, 5000)
-
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.05
-    controls.rotateSpeed = 0.5
-    controls.enableZoom = true
-    controls.minDistance = 3
-    controls.maxDistance = 10
-    controls.autoRotate = true
-    controls.autoRotateSpeed = 0.5
-    controlsRef.current = controls
-    
-    // Add mouse down/up event listeners to prevent conflicts
-    const onMouseDown = () => {
-      if (controlsRef.current) {
-        controlsRef.current.autoRotate = false;
+    const simulateBadNode = () => {
+      // Reset previous bad node
+      if (badNode !== null) {
+        const prevNode = nodes[badNode];
+        const material = prevNode.material as THREE.MeshPhongMaterial;
+        material.color.setHex(0x00ff88);
+        material.emissive.setHex(0x00ff88);
       }
-    };
-    
-    const onMouseUp = () => {
-      if (controlsRef.current) {
-        controlsRef.current.autoRotate = true;
-      }
-    };
-    
-    renderer.domElement.addEventListener("mousedown", onMouseDown);
-    renderer.domElement.addEventListener("mouseup", onMouseUp);
-
-    // Raycaster for hover effects
-    const raycaster = new THREE.Raycaster()
-    const mouse = new THREE.Vector2()
-
-    const onMouseMove = (event: MouseEvent) => {
-      // Prevent default behavior to avoid conflicts with OrbitControls
-      event.preventDefault();
       
-      const rect = renderer.domElement.getBoundingClientRect()
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      // Set new bad node
+      const randomIndex = Math.floor(Math.random() * nodes.length);
+      setBadNode(randomIndex);
+      
+      const nodeMesh = nodes[randomIndex];
+      const material = nodeMesh.material as THREE.MeshPhongMaterial;
+      material.color.setHex(0xff0000);
+      material.emissive.setHex(0xff0000);
+      
+      // Create ripple effect
+      createRipple(nodeMesh.position.clone());
+    };
 
-      raycaster.setFromCamera(mouse, camera)
-      const intersects = raycaster.intersectObjects(nodeObjects)
+    // Start the simulation
+    const simInterval = setInterval(simulateBadNode, 5000);
 
-      // Reset all nodes
-      nodeObjects.forEach(node => {
-        const material = node.material as THREE.MeshPhongMaterial
-        material.emissiveIntensity = 0.5
-        node.scale.set(1, 1, 1)
-      })
-
-      if (intersects.length > 0) {
-        const hoveredMesh = intersects[0].object as THREE.Mesh
-        const nodeIndex = hoveredMesh.userData.nodeIndex
+    // OrbitControls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.rotateSpeed = 0.5;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.0;
+    controls.minDistance = 3;
+    controls.maxDistance = 10;
+    
+    // Raycaster for interaction
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    
+    function onMouseMove(event: MouseEvent) {
+      // Get mouse position
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      // Check for intersections
+      raycaster.setFromCamera(mouse, camera);
+      
+      // Reset region highlights
+      regionMeshes.forEach(mesh => {
+        (mesh.material as THREE.MeshBasicMaterial).opacity = 0;
+      });
+      
+      // Check nodes intersection first
+      const nodeIntersects = raycaster.intersectObjects(nodes);
+      if (nodeIntersects.length > 0) {
+        const nodeMesh = nodeIntersects[0].object as THREE.Mesh;
+        const regionIndex = nodeMesh.userData.regionIndex;
         
-        // Find region by checking which region's bounds the node falls into
-        let foundRegionIndex = -1
-        for (let i = 0; i < REGIONS.length; i++) {
-          const region = REGIONS[i]
-          const node = ALL_NODES[nodeIndex]
-          const latDiff = Math.abs(node.lat - region.lat)
-          const lngDiff = Math.abs(node.lng - region.lng)
-          if (latDiff <= 20 && lngDiff <= 20) {
-            foundRegionIndex = i
-            break
-          }
-        }
+        // Highlight region
+        const regionMesh = regionMeshes[regionIndex];
+        (regionMesh.material as THREE.MeshBasicMaterial).opacity = 0.2;
         
-        // Highlight hovered node
-        const material = hoveredMesh.material as THREE.MeshPhongMaterial
-        material.emissiveIntensity = 1
-        hoveredMesh.scale.set(1.5, 1.5, 1.5)
-
-        // Update tooltip and region highlighting only if we found a valid region
-        if (foundRegionIndex !== -1) {
-          const worldPosition = new THREE.Vector3()
-          hoveredMesh.getWorldPosition(worldPosition)
-          worldPosition.project(camera)
-          
-          const x = (worldPosition.x * 0.5 + 0.5) * container.clientWidth
-          const y = (-worldPosition.y * 0.5 + 0.5) * container.clientHeight
-          
-          setHoveredRegion({
-            name: REGIONS[foundRegionIndex].name,
-            position: new THREE.Vector3(x, y, 0)
-          })
-          setSelectedRegion(foundRegionIndex)
-        }
-      } else {
-        setHoveredRegion(null)
-        setSelectedRegion(null)
+        // Update tooltip
+        const worldPos = new THREE.Vector3();
+        nodeMesh.getWorldPosition(worldPos);
+        worldPos.project(camera);
+        
+        const x = (worldPos.x * 0.5 + 0.5) * containerRef.current!.clientWidth;
+        const y = (-worldPos.y * 0.5 + 0.5) * containerRef.current!.clientHeight;
+        
+        setHoveredRegion({
+          name: REGIONS[regionIndex].name,
+          position: new THREE.Vector3(x, y, 0)
+        });
+        return;
       }
+      
+      // If no nodes were hit, check region markers
+      const markerIntersects = raycaster.intersectObjects(regionMarkers);
+      if (markerIntersects.length > 0) {
+        const marker = markerIntersects[0].object as THREE.Mesh;
+        const regionIndex = marker.userData.regionIndex;
+        
+        // Highlight region
+        const regionMesh = regionMeshes[regionIndex];
+        (regionMesh.material as THREE.MeshBasicMaterial).opacity = 0.2;
+        
+        // Update tooltip
+        const worldPos = new THREE.Vector3();
+        marker.getWorldPosition(worldPos);
+        worldPos.project(camera);
+        
+        const x = (worldPos.x * 0.5 + 0.5) * containerRef.current!.clientWidth;
+        const y = (-worldPos.y * 0.5 + 0.5) * containerRef.current!.clientHeight;
+        
+        setHoveredRegion({
+          name: REGIONS[regionIndex].name,
+          position: new THREE.Vector3(x, y, 0)
+        });
+        return;
+      }
+      
+      // If no intersections, clear the tooltip
+      setHoveredRegion(null);
     }
-
-    renderer.domElement.addEventListener("mousemove", onMouseMove)
-
-    // Animation loop
-    let animationFrameId: number
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate)
-      controls.update()
-
-      // Update node colors
-      nodeObjects.forEach((node, index) => {
-        const material = node.material as THREE.MeshPhongMaterial
-        material.color.setHex(nodeStates[index].color)
-        material.emissive.setHex(nodeStates[index].color)
-      })
-
-      // Update region highlighting
-      regionHighlightMaterials.forEach(({ material, mesh }, index) => {
-        mesh.rotation.copy(earth.rotation)
-        if (selectedRegion === index) {
-          material.opacity = 0.2
-        } else {
-          material.opacity = 0
-        }
-      })
-
-      // Pulse the glow
-      const time = Date.now() * 0.001
-      glow.scale.set(
-        1 + Math.sin(time) * 0.03,
-        1 + Math.sin(time) * 0.03,
-        1 + Math.sin(time) * 0.03
-      )
-
-      renderer.render(scene, camera)
-    }
-
-    animate()
-    setIsInitialized(true)
-
+    
     // Handle window resize
     const handleResize = () => {
-      if (!container) return
-      const width = container.clientWidth
-      const height = container.clientHeight
-      camera.aspect = width / height
-      camera.updateProjectionMatrix()
-      renderer.setSize(width, height)
+      if (!containerRef.current) return;
+      const width = containerRef.current.clientWidth;
+      const height = containerRef.current.clientHeight;
+      
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+    };
+    
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
     }
-
-    window.addEventListener("resize", handleResize)
-
+    
+    // Add event listeners
+    window.addEventListener('resize', handleResize);
+    renderer.domElement.addEventListener('mousemove', onMouseMove);
+    
+    // Start animation
+    animate();
+    
     // Cleanup
     return () => {
-      window.removeEventListener("resize", handleResize)
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId)
+      window.removeEventListener('resize', handleResize);
+      renderer.domElement.removeEventListener('mousemove', onMouseMove);
+      clearInterval(simInterval);
+      
+      // Clean up Three.js resources
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          if (object.geometry) object.geometry.dispose();
+          if (object.material) {
+            if (Array.isArray(object.material)) {
+              object.material.forEach(material => material.dispose());
+            } else {
+              object.material.dispose();
+            }
+          }
+        }
+      });
+      
+      // Remove renderer
+      if (containerRef.current && renderer.domElement.parentElement) {
+        containerRef.current.removeChild(renderer.domElement);
       }
-      clearInterval(simulationInterval)
-      renderer.domElement.removeEventListener("mousemove", onMouseMove)
-      renderer.domElement.removeEventListener("mousedown", onMouseDown)
-      renderer.domElement.removeEventListener("mouseup", onMouseUp)
-      renderer.dispose()
-      if (controlsRef.current) {
-        controlsRef.current.dispose()
-      }
-    }
-  }, [isInitialized])
-
-  const latLngToVector3 = (lat: number, lng: number, radius: number) => {
-    const phi = (90 - lat) * (Math.PI / 180)
-    const theta = (lng + 180) * (Math.PI / 180)
-    const x = -(radius * Math.sin(phi) * Math.cos(theta))
-    const z = radius * Math.sin(phi) * Math.sin(theta)
-    const y = radius * Math.cos(phi)
-    return new THREE.Vector3(x, y, z)
-  }
-
+      
+      renderer.dispose();
+    };
+  }, []);
+  
   return (
-    <div className="w-full h-full" ref={containerRef}>
+    <div 
+      className="w-full h-full" 
+      style={{ 
+        position: 'absolute', 
+        top: 0, 
+        left: 0, 
+        right: 0, 
+        bottom: 0, 
+        minHeight: '600px' 
+      }} 
+      ref={containerRef}
+    >
       {hoveredRegion && (
         <div 
-          className="absolute pointer-events-none z-10 bg-black/80 border border-[#00ff88] rounded-md p-2 text-xs font-mono"
+          className="absolute z-10 bg-black/80 border border-[#00ff88] rounded-md p-2 text-xs font-mono pointer-events-none"
           style={{
             left: `${hoveredRegion.position.x}px`,
             top: `${hoveredRegion.position.y + 20}px`,
@@ -395,9 +364,9 @@ export default function NetworkGlobe() {
       
       <div className="absolute bottom-4 left-4 text-xs text-[#00ff88] font-mono">
         <div>GLOBAL NETWORK: ACTIVE</div>
-        <div>NODES: {nodeStates.filter(state => state.color === 0x00ff88).length} HEALTHY / {nodeStates.length} TOTAL</div>
+        <div>NODES: {ALL_NODES.length - (badNode !== null ? 1 : 0)} HEALTHY / {ALL_NODES.length} TOTAL</div>
         <div>SYSTEM: OPERATIONAL</div>
       </div>
     </div>
-  )
+  );
 }

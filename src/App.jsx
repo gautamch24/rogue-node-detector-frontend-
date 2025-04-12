@@ -1,5 +1,5 @@
 import { ThemeProvider } from "./components/theme-provider"
-import NetworkGlobe from "./components/network-globe"
+import NetworkGlobe from "../components/network-globe"
 import NodeReport from "./components/node-report"
 import StatusBar from "./components/status-bar"
 
@@ -11,7 +11,9 @@ function App() {
         <div className="relative z-10 flex h-screen w-full flex-col">
           <StatusBar />
           <div className="flex flex-1">
-            <NetworkGlobe />
+            <div className="flex-1 relative w-full h-full">
+              <NetworkGlobe />
+            </div>
             <NodeReport />
           </div>
         </div>
