@@ -3,49 +3,205 @@
 import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
-import { useNodeStore } from "@/lib/store"
-import { generateRandomNodes } from "@/lib/node-generator"
+
+// Define regions with their coordinates and names
+const REGIONS = [
+  { name: "North America", lat: 40, lng: -100, connections: [1, 2, 3], color: 0x00ff88 },
+  { name: "Europe", lat: 50, lng: 10, connections: [0, 2, 4], color: 0x00ff88 },
+  { name: "Asia", lat: 35, lng: 105, connections: [1, 3, 4], color: 0x00ff88 },
+  { name: "South America", lat: -15, lng: -55, connections: [0, 2, 4], color: 0x00ff88 },
+  { name: "Australia", lat: -25, lng: 135, connections: [1, 2, 3], color: 0x00ff88 }
+]
+
+// Generate random nodes within each region
+const generateNodesForRegion = (region: typeof REGIONS[0], count: number) => {
+  const nodes = []
+  for (let i = 0; i < count; i++) {
+    const latOffset = (Math.random() - 0.5) * 20
+    const lngOffset = (Math.random() - 0.5) * 20
+    nodes.push({
+      lat: region.lat + latOffset,
+      lng: region.lng + lngOffset,
+      color: 0x00ff88
+    })
+  }
+  return nodes
+}
+
+const ALL_NODES = REGIONS.flatMap(region => generateNodesForRegion(region, 10))
 
 export default function NetworkGlobe() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [hoveredRegion, setHoveredRegion] = useState<{ name: string; position: THREE.Vector3 } | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
-  const { setActiveNode, setNodes } = useNodeStore()
-  const [hoveredNode, setHoveredNode] = useState<{ node: any; position: THREE.Vector3 } | null>(null)
-  const [isClient, setIsClient] = useState(false)
+  const [nodeStates, setNodeStates] = useState(ALL_NODES.map(() => ({ color: 0x00ff88 })))
+  const [selectedRegion, setSelectedRegion] = useState<number | null>(null)
+  const controlsRef = useRef<OrbitControls | null>(null)
 
   useEffect(() => {
-    setIsClient(true)
-  }, [])
+    if (!containerRef.current || isInitialized) return
 
-  useEffect(() => {
-    if (!containerRef.current || isInitialized || !isClient) return
-    
-    // Ensure container has dimensions
-    if (containerRef.current.clientWidth === 0 || containerRef.current.clientHeight === 0) {
-      containerRef.current.style.width = '100%'
-      containerRef.current.style.height = '100%'
-      containerRef.current.style.minHeight = '600px'
-    }
-
-    // Generate random nodes
-    const nodes = generateRandomNodes(50)
-    setNodes(nodes)
+    const container = containerRef.current
 
     // Scene setup
     const scene = new THREE.Scene()
+    scene.fog = new THREE.FogExp2(0x000000, 0.00003)
+
+    // Camera setup
     const camera = new THREE.PerspectiveCamera(
-      45, 
-      containerRef.current.clientWidth / containerRef.current.clientHeight, 
-      0.1, 
-      1000
+      60,
+      container.clientWidth / container.clientHeight,
+      0.1,
+      10000
     )
     camera.position.z = 5
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
-    renderer.setClearColor(0x000000, 0)
-    containerRef.current.innerHTML = '' // Clear any existing content
-    containerRef.current.appendChild(renderer.domElement)
+    // Renderer setup with post-processing
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+    })
+    renderer.setPixelRatio(window.devicePixelRatio)
+    renderer.setSize(container.clientWidth, container.clientHeight)
+    renderer.setClearColor(0x000000, 1)
+    container.appendChild(renderer.domElement)
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x0a192f, 0.2)
+    scene.add(ambientLight)
+
+    const directionalLight = new THREE.DirectionalLight(0x00ff88, 0.5)
+    directionalLight.position.set(5, 3, 5)
+    scene.add(directionalLight)
+
+    // Earth creation
+    const earthGeometry = new THREE.SphereGeometry(2, 64, 64)
+    const earthMaterial = new THREE.MeshPhongMaterial({
+      color: 0x0a192f,
+      emissive: 0x0a192f,
+      emissiveIntensity: 0.2,
+      shininess: 25,
+      transparent: true,
+      opacity: 0.9,
+    })
+    const earth = new THREE.Mesh(earthGeometry, earthMaterial)
+    scene.add(earth)
+
+    // Region highlighting
+    const regionHighlightMaterials = REGIONS.map(() => {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0x00ff88,
+        transparent: true,
+        opacity: 0,
+        side: THREE.BackSide,
+      })
+      const geometry = new THREE.SphereGeometry(2.02, 32, 32)
+      const mesh = new THREE.Mesh(geometry, material)
+      scene.add(mesh)
+      return { material, mesh }
+    })
+
+    // Grid overlay
+    const gridGeometry = new THREE.SphereGeometry(2.01, 32, 32)
+    const gridMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff88,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.1,
+    })
+    const grid = new THREE.Mesh(gridGeometry, gridMaterial)
+    scene.add(grid)
+
+    // Atmosphere glow
+    const glowGeometry = new THREE.SphereGeometry(2.1, 64, 64)
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff88,
+      transparent: true,
+      opacity: 0.1,
+    })
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial)
+    scene.add(glow)
+
+    // Create nodes for each region
+    const nodeObjects: THREE.Mesh[] = []
+    const nodeGeometry = new THREE.SphereGeometry(0.03, 16, 16)
+    
+    // Create nodes and connections
+    const connectionMaterial = new THREE.LineBasicMaterial({
+      color: 0x00ff88,
+      transparent: true,
+      opacity: 0.2,
+    })
+
+    ALL_NODES.forEach((node, index) => {
+      const position = latLngToVector3(node.lat, node.lng, 2)
+      const nodeMaterial = new THREE.MeshPhongMaterial({
+        color: node.color,
+        emissive: node.color,
+        emissiveIntensity: 0.5,
+      })
+      const nodeMesh = new THREE.Mesh(nodeGeometry, nodeMaterial)
+      nodeMesh.position.copy(position)
+      nodeMesh.userData = { nodeIndex: index }
+      nodeObjects.push(nodeMesh)
+      scene.add(nodeMesh)
+    })
+
+    // Create ripple effect
+    const createRipple = (position: THREE.Vector3) => {
+      const rippleGeometry = new THREE.RingGeometry(0, 0.2, 32)
+      const rippleMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff0000,
+        transparent: true,
+        opacity: 1,
+        side: THREE.DoubleSide,
+      })
+      const ripple = new THREE.Mesh(rippleGeometry, rippleMaterial)
+      ripple.position.copy(position)
+      ripple.lookAt(new THREE.Vector3(0, 0, 0))
+      scene.add(ripple)
+
+      const startTime = Date.now()
+      const animate = () => {
+        const elapsed = Date.now() - startTime
+        const duration = 1000 // 1 second animation
+        if (elapsed < duration) {
+          const scale = elapsed / duration * 2
+          ripple.scale.set(scale, scale, scale)
+          rippleMaterial.opacity = 1 - (elapsed / duration)
+          requestAnimationFrame(animate)
+        } else {
+          scene.remove(ripple)
+          ripple.geometry.dispose()
+          rippleMaterial.dispose()
+        }
+      }
+      animate()
+    }
+
+    // Simulate bad nodes
+    const simulateBadNodes = () => {
+      const randomIndex = Math.floor(Math.random() * ALL_NODES.length)
+      setNodeStates(prevStates => {
+        const newStates = [...prevStates]
+        newStates[randomIndex] = { color: 0xff0000 }
+        const position = nodeObjects[randomIndex].position.clone()
+        createRipple(position)
+        return newStates
+      })
+
+      // Reset after 2 seconds
+      setTimeout(() => {
+        setNodeStates(prevStates => {
+          const newStates = [...prevStates]
+          newStates[randomIndex] = { color: 0x00ff88 }
+          return newStates
+        })
+      }, 2000)
+    }
+
+    // Start simulation
+    const simulationInterval = setInterval(simulateBadNodes, 5000)
 
     // Controls
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -53,106 +209,36 @@ export default function NetworkGlobe() {
     controls.dampingFactor = 0.05
     controls.rotateSpeed = 0.5
     controls.enableZoom = true
+    controls.minDistance = 3
+    controls.maxDistance = 10
     controls.autoRotate = true
     controls.autoRotateSpeed = 0.5
-
-    // Earth
-    const earthGeometry = new THREE.SphereGeometry(2, 64, 64)
-    const earthMaterial = new THREE.MeshBasicMaterial({
-      color: 0x1a2e4a,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.6,
-    })
-    const earth = new THREE.Mesh(earthGeometry, earthMaterial)
-    scene.add(earth)
-
-    // Glow effect
-    const glowGeometry = new THREE.SphereGeometry(2.1, 64, 64)
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x0a84ff,
-      transparent: true,
-      opacity: 0.1,
-    })
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial)
-    scene.add(glow)
-
-    // Node meshes
-    const nodeObjects: THREE.Mesh[] = []
-    const nodeGeometry = new THREE.SphereGeometry(0.03, 16, 16)
+    controlsRef.current = controls
     
-    // Create a larger geometry for hover effect
-    const hoverGeometry = new THREE.SphereGeometry(0.05, 16, 16)
+    // Add mouse down/up event listeners to prevent conflicts
+    const onMouseDown = () => {
+      if (controlsRef.current) {
+        controlsRef.current.autoRotate = false;
+      }
+    };
     
-    // Create a pulsing geometry for rogue nodes
-    const rogueHoverGeometry = new THREE.SphereGeometry(0.06, 16, 16)
-
-    nodes.forEach((node, index) => {
-      const { position } = node
-      const nodeMaterial = new THREE.MeshStandardMaterial({
-        color: node.status === "rogue" ? 0xff3b30 : 0x34c759,
-        emissive: node.status === "rogue" ? new THREE.Color(0xff3b30) : new THREE.Color(0x000000),
-        emissiveIntensity: node.status === "rogue" ? 0.3 : 0,
-        roughness: 0.5,
-        metalness: 0.8,
-      })
-
-      const nodeMesh = new THREE.Mesh(nodeGeometry, nodeMaterial)
-      nodeMesh.position.set(position.x * 2, position.y * 2, position.z * 2)
-      nodeMesh.userData = { 
-        nodeIndex: index,
-        originalScale: nodeMesh.scale.clone(),
-        isRogue: node.status === "rogue",
-        node: node
+    const onMouseUp = () => {
+      if (controlsRef.current) {
+        controlsRef.current.autoRotate = true;
       }
-      scene.add(nodeMesh)
-      nodeObjects.push(nodeMesh)
-    })
+    };
+    
+    renderer.domElement.addEventListener("mousedown", onMouseDown);
+    renderer.domElement.addEventListener("mouseup", onMouseUp);
 
-    // Connection lines
-    const connectionMaterial = new THREE.LineBasicMaterial({
-      color: 0x4c6ef5,
-      transparent: true,
-      opacity: 0.3,
-    })
-
-    for (let i = 0; i < nodes.length; i++) {
-      // Connect to 2-3 nearest nodes
-      const connections = Math.floor(Math.random() * 2) + 2
-
-      for (let j = 0; j < connections; j++) {
-        const targetIndex = (i + j + 1) % nodes.length
-
-        const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-          nodeObjects[i].position,
-          nodeObjects[targetIndex].position,
-        ])
-
-        const line = new THREE.Line(lineGeometry, connectionMaterial)
-        scene.add(line)
-      }
-    }
-
-    // Raycaster for node selection and hover
+    // Raycaster for hover effects
     const raycaster = new THREE.Raycaster()
     const mouse = new THREE.Vector2()
 
-    const onMouseClick = (event: MouseEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect()
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-
-      raycaster.setFromCamera(mouse, camera)
-      const intersects = raycaster.intersectObjects(nodeObjects)
-
-      if (intersects.length > 0) {
-        const nodeIndex = intersects[0].object.userData.nodeIndex
-        setActiveNode(nodes[nodeIndex])
-      }
-    }
-
-    // Handle mouse move for hover effects
     const onMouseMove = (event: MouseEvent) => {
+      // Prevent default behavior to avoid conflicts with OrbitControls
+      event.preventDefault();
+      
       const rect = renderer.domElement.getBoundingClientRect()
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
@@ -160,114 +246,89 @@ export default function NetworkGlobe() {
       raycaster.setFromCamera(mouse, camera)
       const intersects = raycaster.intersectObjects(nodeObjects)
 
-      // Reset all nodes to original scale
-      nodeObjects.forEach((node) => {
-        node.scale.copy(node.userData.originalScale)
+      // Reset all nodes
+      nodeObjects.forEach(node => {
+        const material = node.material as THREE.MeshPhongMaterial
+        material.emissiveIntensity = 0.5
+        node.scale.set(1, 1, 1)
       })
 
-      // If hovering over a node
       if (intersects.length > 0) {
         const hoveredMesh = intersects[0].object as THREE.Mesh
         const nodeIndex = hoveredMesh.userData.nodeIndex
-        const isRogue = hoveredMesh.userData.isRogue
         
-        // Apply bulge effect
-        const scaleFactor = isRogue ? 2.5 : 2.0
-        hoveredMesh.scale.set(scaleFactor, scaleFactor, scaleFactor)
-        
-        // Update hover state for tooltip
-        const worldPosition = new THREE.Vector3()
-        hoveredMesh.getWorldPosition(worldPosition)
-        
-        // Project the 3D position to 2D screen coordinates
-        if (!containerRef.current) return;
-        
-        const widthHalf = containerRef.current.clientWidth / 2
-        const heightHalf = containerRef.current.clientHeight / 2
-        
-        const vector = worldPosition.clone()
-        vector.project(camera)
-        
-        vector.x = (vector.x * widthHalf) + widthHalf
-        vector.y = -(vector.y * heightHalf) + heightHalf
-        
-        setHoveredNode({
-          node: nodes[nodeIndex],
-          position: vector
-        })
-        
-        // Add glow effect for rogue nodes
-        if (isRogue) {
-          const nodeMaterial = hoveredMesh.material as THREE.MeshStandardMaterial
-          nodeMaterial.emissive = new THREE.Color(0xff3b30)
-          nodeMaterial.emissiveIntensity = 0.5
-        }
-      } else {
-        setHoveredNode(null)
-      }
-    }
-
-    renderer.domElement.addEventListener("click", onMouseClick)
-    renderer.domElement.addEventListener("mousemove", onMouseMove)
-
-    // Simulate rogue node detection
-    const simulateRogueNode = () => {
-      const randomIndex = Math.floor(Math.random() * nodes.length)
-      const updatedNodes = [...nodes]
-
-      // Reset all nodes
-      updatedNodes.forEach((node) => {
-        node.status = "normal"
-      })
-
-      // Set random node as rogue
-      updatedNodes[randomIndex].status = "rogue"
-      updatedNodes[randomIndex].detectedAt = new Date().toISOString()
-      updatedNodes[randomIndex].threat = {
-        type: ["Data Exfiltration", "Malware", "Unauthorized Access", "DDoS Source"][Math.floor(Math.random() * 4)],
-        severity: ["Critical", "High", "Medium"][Math.floor(Math.random() * 3)],
-        confidence: Math.floor(Math.random() * 30) + 70,
-      }
-
-      // Update node color
-      const nodeMaterial = nodeObjects[randomIndex].material as THREE.MeshStandardMaterial
-      nodeMaterial.color.set(0xff3b30)
-      nodeMaterial.emissive.set(0xff3b30)
-      nodeMaterial.emissiveIntensity = 0.3
-      
-      // Update node userData
-      nodeObjects[randomIndex].userData.isRogue = true
-
-      setNodes(updatedNodes)
-      setActiveNode(updatedNodes[randomIndex])
-    }
-
-    // Simulate rogue node detection every 8-15 seconds
-    const rogueNodeInterval = setInterval(
-      () => {
-        simulateRogueNode()
-      },
-      Math.random() * 7000 + 8000,
-    )
-
-    // Animation loop
-    const animate = () => {
-      requestAnimationFrame(animate)
-      controls.update()
-      
-      // Add pulsing effect to rogue nodes
-      nodeObjects.forEach((nodeMesh) => {
-        if (nodeMesh.userData.isRogue) {
-          const time = Date.now() * 0.001
-          const pulse = Math.sin(time * 3) * 0.1 + 1
-          
-          // Only apply pulse if not currently hovered
-          if (hoveredNode?.node.id !== nodes[nodeMesh.userData.nodeIndex].id) {
-            nodeMesh.scale.set(pulse, pulse, pulse)
+        // Find region by checking which region's bounds the node falls into
+        let foundRegionIndex = -1
+        for (let i = 0; i < REGIONS.length; i++) {
+          const region = REGIONS[i]
+          const node = ALL_NODES[nodeIndex]
+          const latDiff = Math.abs(node.lat - region.lat)
+          const lngDiff = Math.abs(node.lng - region.lng)
+          if (latDiff <= 20 && lngDiff <= 20) {
+            foundRegionIndex = i
+            break
           }
         }
+        
+        // Highlight hovered node
+        const material = hoveredMesh.material as THREE.MeshPhongMaterial
+        material.emissiveIntensity = 1
+        hoveredMesh.scale.set(1.5, 1.5, 1.5)
+
+        // Update tooltip and region highlighting only if we found a valid region
+        if (foundRegionIndex !== -1) {
+          const worldPosition = new THREE.Vector3()
+          hoveredMesh.getWorldPosition(worldPosition)
+          worldPosition.project(camera)
+          
+          const x = (worldPosition.x * 0.5 + 0.5) * container.clientWidth
+          const y = (-worldPosition.y * 0.5 + 0.5) * container.clientHeight
+          
+          setHoveredRegion({
+            name: REGIONS[foundRegionIndex].name,
+            position: new THREE.Vector3(x, y, 0)
+          })
+          setSelectedRegion(foundRegionIndex)
+        }
+      } else {
+        setHoveredRegion(null)
+        setSelectedRegion(null)
+      }
+    }
+
+    renderer.domElement.addEventListener("mousemove", onMouseMove)
+
+    // Animation loop
+    let animationFrameId: number
+    const animate = () => {
+      animationFrameId = requestAnimationFrame(animate)
+      controls.update()
+
+      // Update node colors
+      nodeObjects.forEach((node, index) => {
+        const material = node.material as THREE.MeshPhongMaterial
+        material.color.setHex(nodeStates[index].color)
+        material.emissive.setHex(nodeStates[index].color)
       })
-      
+
+      // Update region highlighting
+      regionHighlightMaterials.forEach(({ material, mesh }, index) => {
+        mesh.rotation.copy(earth.rotation)
+        if (selectedRegion === index) {
+          material.opacity = 0.2
+        } else {
+          material.opacity = 0
+        }
+      })
+
+      // Pulse the glow
+      const time = Date.now() * 0.001
+      glow.scale.set(
+        1 + Math.sin(time) * 0.03,
+        1 + Math.sin(time) * 0.03,
+        1 + Math.sin(time) * 0.03
+      )
+
       renderer.render(scene, camera)
     }
 
@@ -276,77 +337,66 @@ export default function NetworkGlobe() {
 
     // Handle window resize
     const handleResize = () => {
-      if (!containerRef.current) return
-
-      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight
+      if (!container) return
+      const width = container.clientWidth
+      const height = container.clientHeight
+      camera.aspect = width / height
       camera.updateProjectionMatrix()
-      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
+      renderer.setSize(width, height)
     }
 
     window.addEventListener("resize", handleResize)
 
     // Cleanup
     return () => {
-      if (containerRef.current) {
-        containerRef.current.removeChild(renderer.domElement)
-      }
-      renderer.domElement.removeEventListener("click", onMouseClick)
-      renderer.domElement.removeEventListener("mousemove", onMouseMove)
       window.removeEventListener("resize", handleResize)
-      clearInterval(rogueNodeInterval)
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+      }
+      clearInterval(simulationInterval)
+      renderer.domElement.removeEventListener("mousemove", onMouseMove)
+      renderer.domElement.removeEventListener("mousedown", onMouseDown)
+      renderer.domElement.removeEventListener("mouseup", onMouseUp)
+      renderer.dispose()
+      if (controlsRef.current) {
+        controlsRef.current.dispose()
+      }
     }
-  }, [isInitialized, setActiveNode, setNodes, isClient])
+  }, [isInitialized])
 
-  if (!isClient) {
-    return <div className="relative flex-1 h-full min-h-[600px] w-full" ref={containerRef}></div>
+  const latLngToVector3 = (lat: number, lng: number, radius: number) => {
+    const phi = (90 - lat) * (Math.PI / 180)
+    const theta = (lng + 180) * (Math.PI / 180)
+    const x = -(radius * Math.sin(phi) * Math.cos(theta))
+    const z = radius * Math.sin(phi) * Math.sin(theta)
+    const y = radius * Math.cos(phi)
+    return new THREE.Vector3(x, y, z)
   }
 
   return (
-    <div className="relative flex-1 h-full min-h-[600px] w-full" ref={containerRef}>
-      {hoveredNode && (
+    <div className="w-full h-full" ref={containerRef}>
+      {hoveredRegion && (
         <div 
-          className={`absolute pointer-events-none z-10 bg-gray-900/90 border ${hoveredNode.node.status === 'rogue' ? 'border-red-500 shadow-red-500/30 shadow-lg' : 'border-green-500'} rounded-md p-2 text-xs font-mono w-64`}
+          className="absolute pointer-events-none z-10 bg-black/80 border border-[#00ff88] rounded-md p-2 text-xs font-mono"
           style={{
-            left: `${hoveredNode.position.x}px`,
-            top: `${hoveredNode.position.y + 20}px`,
-            transform: 'translate(-50%, 0)'
+            left: `${hoveredRegion.position.x}px`,
+            top: `${hoveredRegion.position.y + 20}px`,
+            transform: 'translate(-50%, 0)',
+            boxShadow: '0 0 20px rgba(0, 255, 136, 0.3)',
+            color: '#00ff88'
           }}
         >
-          <div className="flex justify-between items-center mb-1">
-            <span className="font-bold">{hoveredNode.node.id}</span>
-            <span className={`text-xs px-1.5 py-0.5 rounded ${hoveredNode.node.status === 'rogue' ? 'bg-red-900/50 text-red-400' : 'bg-green-900/50 text-green-400'}`}>
-              {hoveredNode.node.status.toUpperCase()}
-            </span>
-          </div>
-          <div className="text-gray-400 mb-1">{hoveredNode.node.location}</div>
-          
-          {hoveredNode.node.status === 'rogue' && (
-            <div className="mt-2 pt-2 border-t border-gray-700">
-              <div className="text-red-400 font-bold mb-1">⚠️ {hoveredNode.node.threat?.type}</div>
-              <div className="flex justify-between text-xs">
-                <span>Severity: {hoveredNode.node.threat?.severity}</span>
-                <span>Confidence: {hoveredNode.node.threat?.confidence}%</span>
-              </div>
-            </div>
-          )}
-          
-          <div className="mt-2 pt-2 border-t border-gray-700 grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
-            <div>
-              <span className="text-gray-400">IP: </span>
-              <span>{hoveredNode.node.specs?.ip}</span>
-            </div>
-            <div>
-              <span className="text-gray-400">CPU: </span>
-              <span className="truncate">{hoveredNode.node.specs?.cpu.split(' ')[0]}</span>
-            </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[#00ff88]">⚡</span>
+            <span>{hoveredRegion.name}</span>
           </div>
         </div>
       )}
       
-      <div className="absolute bottom-4 left-4 text-xs text-green-400 font-mono">
-        <div>NETWORK STATUS: MONITORING</div>
-        <div>NODES: ACTIVE</div>
-        <div>THREAT DETECTION: ENABLED</div>
+      <div className="absolute bottom-4 left-4 text-xs text-[#00ff88] font-mono">
+        <div>GLOBAL NETWORK: ACTIVE</div>
+        <div>NODES: {nodeStates.filter(state => state.color === 0x00ff88).length} HEALTHY / {nodeStates.length} TOTAL</div>
+        <div>SYSTEM: OPERATIONAL</div>
       </div>
     </div>
   )

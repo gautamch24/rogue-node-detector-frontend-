@@ -23,6 +23,10 @@ export default function NetworkGlobe() {
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000)
     camera.position.z = 5
 
+    // Globe Fix
+    const ambientLight = new THREE.AmbientLight(0xcccccc);
+    scene.add(ambientLight);
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
     renderer.setClearColor(0x000000, 0)

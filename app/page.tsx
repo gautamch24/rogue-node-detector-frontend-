@@ -5,17 +5,19 @@ import StatusBar from "@/components/status-bar"
 
 export default function Home() {
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-black text-white">
+    <main className="relative flex min-h-screen flex-col bg-black text-white">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-gray-900 to-black"></div>
       <div className="relative z-10 flex h-screen w-full flex-col">
         <StatusBar />
-        <div className="flex flex-1">
+        <div className="flex flex-1 relative">
           <ClientWrapper>
-            <div className="w-full h-full min-h-[600px]">
+            <div className="absolute inset-0">
               <NetworkGlobe />
             </div>
           </ClientWrapper>
-          <NodeReport />
+          <div className="relative z-20">
+            <NodeReport />
+          </div>
         </div>
       </div>
     </main>
