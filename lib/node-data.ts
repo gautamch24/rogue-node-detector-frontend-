@@ -305,7 +305,7 @@ export interface GPUPricing {
 // API service to fetch node data
 export async function fetchNodeData(): Promise<NodeDataMap | null> {
   try {
-    const response = await fetch('http://localhost:3000/api/nodes');
+    const response = await fetch('http://localhost:3001/api/provider-gpus/detailed');
     if (!response.ok) {
       console.error('Failed to fetch node data:', response.statusText);
       return null;
