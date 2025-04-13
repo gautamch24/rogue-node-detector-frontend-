@@ -10,6 +10,15 @@ export interface GPUPricing {
     socket: string;
     pricing: GPUPricing[];
     agent: string;
+    isRogue: boolean;
+    userTrusted?: boolean;
+    rogueDetails?: {
+      detectedAt: string;
+      threat: string;
+      severity: 'low' | 'medium' | 'high' | 'critical';
+      suspiciousActivity: string;
+      recommendedAction: string;
+    };
   }
   
   export interface NodeData {
@@ -34,7 +43,8 @@ export interface GPUPricing {
             { "type": "Community", "price": null },
             { "type": "Secure", "price": 3.45 }
           ],
-          "agent": "Claude"
+          "agent": "Claude",
+          "isRogue": false
         },
         {
           "model": "H100",
@@ -44,7 +54,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.25 },
             { "type": "Secure", "price": 5.00 }
           ],
-          "agent": "LLM"
+          "agent": "LLM",
+          "isRogue": false
         },
         {
           "model": "V100",
@@ -54,7 +65,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 2.75 },
             { "type": "Secure", "price": 3.20 }
           ],
-          "agent": "GPT-4"
+          "agent": "GPT-4",
+          "isRogue": false
         },
         {
           "model": "A100",
@@ -64,7 +76,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.80 },
             { "type": "Secure", "price": 5.50 }
           ],
-          "agent": "Bard"
+          "agent": "Bard",
+          "isRogue": false
         },
         {
           "model": "T100",
@@ -74,7 +87,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 1.95 },
             { "type": "Secure", "price": 2.30 }
           ],
-          "agent": "Custom LLM"
+          "agent": "Custom LLM",
+          "isRogue": false
         }
       ]
     },
@@ -89,7 +103,8 @@ export interface GPUPricing {
             { "type": "Community", "price": null },
             { "type": "Secure", "price": 3.45 }
           ],
-          "agent": "GPT-4"
+          "agent": "GPT-4",
+          "isRogue": false
         },
         {
           "model": "H100",
@@ -99,7 +114,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.30 },
             { "type": "Secure", "price": 5.10 }
           ],
-          "agent": "Claude"
+          "agent": "Claude",
+          "isRogue": false
         },
         {
           "model": "V100",
@@ -109,7 +125,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 2.80 },
             { "type": "Secure", "price": 3.25 }
           ],
-          "agent": "LLM"
+          "agent": "LLM",
+          "isRogue": false
         },
         {
           "model": "A100",
@@ -119,7 +136,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.90 },
             { "type": "Secure", "price": 5.55 }
           ],
-          "agent": "Bard"
+          "agent": "Bard",
+          "isRogue": false
         },
         {
           "model": "T100",
@@ -129,7 +147,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 2.00 },
             { "type": "Secure", "price": 2.35 }
           ],
-          "agent": "Custom LLM"
+          "agent": "Custom LLM",
+          "isRogue": false
         }
       ]
     },
@@ -144,7 +163,8 @@ export interface GPUPricing {
             { "type": "Community", "price": null },
             { "type": "Secure", "price": 3.45 }
           ],
-          "agent": "LLM"
+          "agent": "LLM",
+          "isRogue": false
         },
         {
           "model": "H100",
@@ -154,7 +174,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.20 },
             { "type": "Secure", "price": 5.05 }
           ],
-          "agent": "GPT-4"
+          "agent": "GPT-4",
+          "isRogue": false
         },
         {
           "model": "V100",
@@ -164,7 +185,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 2.70 },
             { "type": "Secure", "price": 3.15 }
           ],
-          "agent": "Claude"
+          "agent": "Claude",
+          "isRogue": false
         },
         {
           "model": "A100",
@@ -174,7 +196,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.85 },
             { "type": "Secure", "price": 5.45 }
           ],
-          "agent": "Bard"
+          "agent": "Bard",
+          "isRogue": false
         },
         {
           "model": "T100",
@@ -184,7 +207,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 1.90 },
             { "type": "Secure", "price": 2.25 }
           ],
-          "agent": "Custom LLM"
+          "agent": "Custom LLM",
+          "isRogue": false
         }
       ]
     },
@@ -199,7 +223,8 @@ export interface GPUPricing {
             { "type": "Community", "price": null },
             { "type": "Secure", "price": 3.45 }
           ],
-          "agent": "Bard"
+          "agent": "Bard",
+          "isRogue": true
         },
         {
           "model": "H100",
@@ -209,7 +234,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.35 },
             { "type": "Secure", "price": 5.15 }
           ],
-          "agent": "GPT-4"
+          "agent": "GPT-4",
+          "isRogue": false
         },
         {
           "model": "V100",
@@ -219,7 +245,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 2.85 },
             { "type": "Secure", "price": 3.30 }
           ],
-          "agent": "Claude"
+          "agent": "Claude",
+          "isRogue": true
         },
         {
           "model": "A100",
@@ -229,7 +256,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 5.00 },
             { "type": "Secure", "price": 5.65 }
           ],
-          "agent": "LLM"
+          "agent": "LLM",
+          "isRogue": false
         },
         {
           "model": "T100",
@@ -239,7 +267,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 2.05 },
             { "type": "Secure", "price": 2.40 }
           ],
-          "agent": "Custom LLM"
+          "agent": "Custom LLM",
+          "isRogue": false
         }
       ]
     },
@@ -254,7 +283,8 @@ export interface GPUPricing {
             { "type": "Community", "price": null },
             { "type": "Secure", "price": 3.45 }
           ],
-          "agent": "Custom LLM"
+          "agent": "Custom LLM",
+          "isRogue": false
         },
         {
           "model": "H100",
@@ -264,7 +294,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.15 },
             { "type": "Secure", "price": 4.95 }
           ],
-          "agent": "Claude"
+          "agent": "Claude",
+          "isRogue": false
         },
         {
           "model": "V100",
@@ -274,7 +305,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 2.65 },
             { "type": "Secure", "price": 3.05 }
           ],
-          "agent": "GPT-4"
+          "agent": "GPT-4",
+          "isRogue": false
         },
         {
           "model": "A100",
@@ -284,7 +316,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 4.75 },
             { "type": "Secure", "price": 5.40 }
           ],
-          "agent": "LLM"
+          "agent": "LLM",
+          "isRogue": true
         },
         {
           "model": "T100",
@@ -294,7 +327,8 @@ export interface GPUPricing {
             { "type": "Community", "price": 1.85 },
             { "type": "Secure", "price": 2.20 }
           ],
-          "agent": "Bard"
+          "agent": "Bard",
+          "isRogue": true
         }
       ]
     }
