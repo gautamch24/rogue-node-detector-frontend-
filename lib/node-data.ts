@@ -299,18 +299,20 @@ export interface GPUPricing {
           "agent": "Bard"
         }
       ]
-    }
+    } 
   };
 
 // API service to fetch node data
 export async function fetchNodeData(): Promise<NodeDataMap | null> {
   try {
+    console.log('Fetching node data from backend...');
     const response = await fetch('http://localhost:3001/api/provider-gpus/detailed');
     if (!response.ok) {
       console.error('Failed to fetch node data:', response.statusText);
       return null;
     }
     const data = await response.json();
+    console.log('Node data fetched successfully:', data);
     return data as NodeDataMap;
   } catch (error) {
     console.error('Error fetching node data:', error);
@@ -329,6 +331,28 @@ export function getCurrentNodeData(): NodeDataMap {
 // Function to update node data
 export function updateNodeData(newData: NodeDataMap | null): void {
   if (newData) {
+    console.log('Updating node data with:', newData);
+    
+    // Check for rogue GPUs and log them
+    const rogueGpus: { node: string, gpu: string, reason: string }[] = [];
+    Object.keys(newData).forEach(nodeName => {
+      newData[nodeName].gpus.forEach(gpu => {
+        if (gpu.isRogue) {
+          rogueGpus.push({
+            node: nodeName,
+            gpu: gpu.model,
+            reason: gpu.reasonOfRogue || 'Unknown reason'
+          });
+        }
+      });
+    });
+    
+    if (rogueGpus.length > 0) {
+      console.log('Detected rogue GPUs:', rogueGpus);
+    } else {
+      console.log('No rogue GPUs detected in this update');
+    }
+    
     currentNodeData = newData;
   }
 }
