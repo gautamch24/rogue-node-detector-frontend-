@@ -304,11 +304,16 @@ export default function NetworkGlobe() {
         const regionIndex = (node as any).userData?.regionIndex;
         if (regionIndex !== undefined) {
           const nodeKeys = Object.keys(currentData);
+          if (nodeKeys.length === 0) return; // No data yet
+          
           const nodeName = nodeKeys[regionIndex % nodeKeys.length];
           const nodeData = currentData[nodeName];
           
-          // Check if any GPU in this node is rogue
-          const hasRogueGpu = nodeData?.gpus.some(gpu => gpu.isRogue === true);
+          // Check if any GPU in this node is rogue - with proper null checks
+          const hasRogueGpu = nodeData && 
+                             nodeData.gpus && 
+                             Array.isArray(nodeData.gpus) && 
+                             nodeData.gpus.some(gpu => gpu && gpu.isRogue === true);
           
           if (hasRogueGpu) {
             // Cast to proper material type with color property

@@ -307,15 +307,53 @@ export async function fetchNodeData(): Promise<NodeDataMap | null> {
   try {
     console.log('Fetching node data from backend...');
     const response = await fetch('http://localhost:3001/api/provider-gpus/detailed');
+    
     if (!response.ok) {
-      console.error('Failed to fetch node data:', response.statusText);
+      console.error(`Failed to fetch node data: ${response.status} ${response.statusText}`);
+      
+      // Try to get more details from error response
+      try {
+        const errorData = await response.text();
+        console.error('Error details:', errorData);
+      } catch (detailsError) {
+        console.error('Could not parse error details');
+      }
+      
       return null;
     }
+    
     const data = await response.json();
+    
+    // Validate the data structure
+    if (!data || typeof data !== 'object') {
+      console.error('API returned invalid data format:', data);
+      return null;
+    }
+    
+    // Check if the structure matches what we expect
+    const hasValidStructure = Object.keys(data).length > 0 && 
+                              Object.values(data).every(node => 
+                                node && 
+                                typeof node === 'object' && 
+                                'gpus' in node && 
+                                Array.isArray((node as any).gpus)
+                              );
+    
+    if (!hasValidStructure) {
+      console.error('API data does not match expected structure:', data);
+      return null;
+    }
+    
     console.log('Node data fetched successfully:', data);
     return data as NodeDataMap;
   } catch (error) {
     console.error('Error fetching node data:', error);
+    
+    // Check for network-related errors
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      console.error('Network error - Is the backend running at http://localhost:3001?');
+    }
+    
     return null;
   }
 }
@@ -330,17 +368,43 @@ export function getCurrentNodeData(): NodeDataMap {
 
 // Function to update node data
 export function updateNodeData(newData: NodeDataMap | null): void {
-  if (newData) {
+  if (!newData) {
+    console.warn('Received null or undefined data from the API');
+    return;
+  }
+  
+  try {
     console.log('Updating node data with:', newData);
+    
+    // Validate the data has the expected structure
+    if (typeof newData !== 'object') {
+      console.error('API returned non-object data:', newData);
+      return;
+    }
     
     // Check for rogue GPUs and log them
     const rogueGpus: { node: string, gpu: string, reason: string }[] = [];
+    
     Object.keys(newData).forEach(nodeName => {
-      newData[nodeName].gpus.forEach(gpu => {
+      const node = newData[nodeName];
+      
+      // Ensure node and gpus are valid
+      if (!node || !node.gpus || !Array.isArray(node.gpus)) {
+        console.warn(`Invalid node data structure for ${nodeName}:`, node);
+        return;
+      }
+      
+      node.gpus.forEach(gpu => {
+        // Ensure gpu is valid
+        if (!gpu || typeof gpu !== 'object') {
+          console.warn(`Invalid GPU data in ${nodeName}:`, gpu);
+          return;
+        }
+        
         if (gpu.isRogue) {
           rogueGpus.push({
             node: nodeName,
-            gpu: gpu.model,
+            gpu: gpu.model || 'Unknown GPU',
             reason: gpu.reasonOfRogue || 'Unknown reason'
           });
         }
@@ -353,7 +417,10 @@ export function updateNodeData(newData: NodeDataMap | null): void {
       console.log('No rogue GPUs detected in this update');
     }
     
+    // Update the data
     currentNodeData = newData;
+  } catch (error) {
+    console.error('Error processing node data:', error);
   }
 }
 
