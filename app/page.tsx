@@ -3,6 +3,7 @@
 import ClientWrapper from "@/components/client-wrapper"
 import NodeReport from "@/components/node-report"
 import StatusBar from "@/components/status-bar"
+import NetworkGlobe from "@/components/network-globe"
 import { useEffect } from "react"
 
 export default function Home() {
@@ -22,6 +23,11 @@ export default function Home() {
         <StatusBar />
         <div className="flex flex-1 relative">
           {/* Globe is now handled by src/App.jsx */}
+          <ClientWrapper>
+            <div className="w-full h-full" style={{ position: 'absolute', inset: 0, minHeight: '500px' }}>
+              <NetworkGlobe />
+            </div>
+          </ClientWrapper>
           <div className="relative z-20">
             <NodeReport />
           </div>

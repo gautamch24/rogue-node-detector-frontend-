@@ -10,6 +10,8 @@ export interface GPUPricing {
     socket: string;
     pricing: GPUPricing[];
     agent: string;
+    isRogue?: boolean;
+    reasonOfRogue?: string;
   }
   
   export interface NodeData {
@@ -299,3 +301,57 @@ export interface GPUPricing {
       ]
     }
   };
+
+// API service to fetch node data
+export async function fetchNodeData(): Promise<NodeDataMap | null> {
+  try {
+    const response = await fetch('http://localhost:3000/api/nodes');
+    if (!response.ok) {
+      console.error('Failed to fetch node data:', response.statusText);
+      return null;
+    }
+    const data = await response.json();
+    return data as NodeDataMap;
+  } catch (error) {
+    console.error('Error fetching node data:', error);
+    return null;
+  }
+}
+
+// Store for current node data that can be updated
+let currentNodeData: NodeDataMap = { ...NODE_DATA };
+
+// Function to get the current node data
+export function getCurrentNodeData(): NodeDataMap {
+  return currentNodeData;
+}
+
+// Function to update node data
+export function updateNodeData(newData: NodeDataMap | null): void {
+  if (newData) {
+    currentNodeData = newData;
+  }
+}
+
+// Function to start polling for node data updates
+let pollingInterval: NodeJS.Timeout | null = null;
+
+export function startNodeDataPolling(intervalMs: number = 5000): void {
+  // Clear any existing interval
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+  }
+  
+  // Set up polling
+  pollingInterval = setInterval(async () => {
+    const newData = await fetchNodeData();
+    updateNodeData(newData);
+  }, intervalMs);
+}
+
+export function stopNodeDataPolling(): void {
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+    pollingInterval = null;
+  }
+}

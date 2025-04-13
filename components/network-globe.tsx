@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
-import { NODE_DATA, NodeData } from "@/lib/node-data"
+import { NODE_DATA, NodeData, getCurrentNodeData, startNodeDataPolling, stopNodeDataPolling } from "@/lib/node-data"
 
 let GLOBE_INSTANCE_COUNT = 0;
 const GLOBE_DEBUG = true; // Enable detailed logging
@@ -52,6 +52,7 @@ export default function NetworkGlobe() {
   const [badNode, setBadNode] = useState<number | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const instanceIdRef = useRef<number | null>(null);
+  const [rogueNodes, setRogueNodes] = useState<number[]>([]);
 
   // Convert lat/lng to 3D coordinates
   const latLngToVector3 = (lat: number, lng: number, radius: number) => {
@@ -89,6 +90,9 @@ export default function NetworkGlobe() {
     instanceIdRef.current = GLOBE_INSTANCE_COUNT;
     debugLog(`Initializing globe for ID: ${uniqueId.current}, assigned instance #${instanceIdRef.current}, new count: ${GLOBE_INSTANCE_COUNT}`);
     setIsInitialized(true);
+    
+    // Start polling for node data
+    startNodeDataPolling(5000);
     
     // Basic Three.js setup
     const scene = new THREE.Scene();
@@ -290,31 +294,77 @@ export default function NetworkGlobe() {
       expandRipple();
     };
 
+    // Function to update node colors based on current data
+    const updateNodeColors = () => {
+      const currentData = getCurrentNodeData();
+      const newRogueNodes: number[] = [];
+
+      nodes.forEach((node, index) => {
+        // Store regionIndex in user data to access it later
+        const regionIndex = (node as any).userData?.regionIndex;
+        if (regionIndex !== undefined) {
+          const nodeKeys = Object.keys(currentData);
+          const nodeName = nodeKeys[regionIndex % nodeKeys.length];
+          const nodeData = currentData[nodeName];
+          
+          // Check if any GPU in this node is rogue
+          const hasRogueGpu = nodeData?.gpus.some(gpu => gpu.isRogue === true);
+          
+          if (hasRogueGpu) {
+            // Cast to proper material type with color property
+            const nodeMaterial = node.material as THREE.MeshPhongMaterial;
+            nodeMaterial.color.set(0xff0000); // Red for nodes with rogue GPUs
+            newRogueNodes.push(index);
+          } else {
+            // Cast to proper material type with color property
+            const nodeMaterial = node.material as THREE.MeshPhongMaterial;
+            nodeMaterial.color.set(0x00ff88); // Default color
+          }
+        }
+      });
+
+      // Update the rogue nodes state
+      setRogueNodes(newRogueNodes);
+    };
+
+    // Set up an interval to check for updated node data
+    const nodeDataCheckInterval = setInterval(() => {
+      updateNodeColors();
+    }, 500);
+
     // Simulate bad nodes
     const simulateBadNode = () => {
-      // Reset previous bad node
-      if (badNode !== null) {
-        const prevNode = nodes[badNode];
-        const material = prevNode.material as THREE.MeshPhongMaterial;
-        material.color.setHex(0x00ff88);
-        material.emissive.setHex(0x00ff88);
+      if (rogueNodes.length > 0) {
+        // Use existing rogue nodes from API data
+        const randomRogueIndex = Math.floor(Math.random() * rogueNodes.length);
+        const randomNodeIndex = rogueNodes[randomRogueIndex];
+        
+        const position = nodes[randomNodeIndex].position.clone();
+        setBadNode(randomNodeIndex);
+        
+        // Create ripple effect at rogue node position
+        createRipple(position);
+        
+        setTimeout(() => {
+          setBadNode(null);
+        }, 2000);
+      } else if (nodes.length > 0) {
+        // Fallback to random node if no rogue nodes
+        const randomIndex = Math.floor(Math.random() * nodes.length);
+        const position = nodes[randomIndex].position.clone();
+        setBadNode(randomIndex);
+        
+        // Create ripple effect
+        createRipple(position);
+        
+        setTimeout(() => {
+          setBadNode(null);
+        }, 2000);
       }
-      
-      // Set new bad node
-      const randomIndex = Math.floor(Math.random() * nodes.length);
-      setBadNode(randomIndex);
-      
-      const nodeMesh = nodes[randomIndex];
-      const material = nodeMesh.material as THREE.MeshPhongMaterial;
-      material.color.setHex(0xff0000);
-      material.emissive.setHex(0xff0000);
-      
-      // Create ripple effect
-      createRipple(nodeMesh.position.clone());
     };
 
     // Start the simulation
-    const simInterval = setInterval(simulateBadNode, 5000);
+    const nodeInterval = setInterval(simulateBadNode, 5000);
 
     // OrbitControls
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -454,10 +504,12 @@ export default function NetworkGlobe() {
     
     // Cleanup
     return () => {
-      debugLog(`Cleanup triggered for ID: ${uniqueId.current}, instance #${instanceIdRef.current}, GLOBE_INSTANCE_COUNT: ${GLOBE_INSTANCE_COUNT}`);
-      window.removeEventListener('resize', handleResize);
-      renderer.domElement.removeEventListener('mousemove', onMouseMove);
-      clearInterval(simInterval);
+      // Stop API polling
+      stopNodeDataPolling();
+      
+      // Clear all intervals
+      clearInterval(nodeInterval);
+      clearInterval(nodeDataCheckInterval);
       
       // Clean up Three.js resources
       scene.traverse((object) => {
@@ -549,15 +601,25 @@ export default function NetworkGlobe() {
                 {hoveredNode.data.trustworthyScore.toFixed(1)}/10.0
               </span>
             </div>
-            
+
             <div className="mt-2 border-t border-gray-700 pt-2">
               <div className="text-sm font-bold mb-2">Available GPUs:</div>
               <div className="grid grid-cols-1 gap-2">
                 {hoveredNode.data.gpus.map((gpu, idx) => (
-                  <div key={idx} className="bg-gray-900 p-2 rounded">
+                  <div key={idx} className={`bg-gray-900 p-2 rounded ${gpu.isRogue ? 'border border-red-700' : ''}`}>
                     <div className="font-bold text-blue-400">{gpu.model} ({gpu.VRAM})</div>
                     <div className="text-xs text-gray-400">Socket: {gpu.socket}</div>
                     <div className="text-xs text-gray-400">Agent: {gpu.agent}</div>
+                    
+                    {gpu.isRogue && (
+                      <div className="bg-red-900/50 border border-red-700 p-2 rounded mt-1 mb-1">
+                        <div className="font-bold text-red-400">ROGUE GPU DETECTED</div>
+                        {gpu.reasonOfRogue && (
+                          <div className="text-red-200 text-xs mt-1">{gpu.reasonOfRogue}</div>
+                        )}
+                      </div>
+                    )}
+                    
                     <div className="mt-1 grid grid-cols-2 gap-1">
                       {gpu.pricing.map((price, i) => (
                         <div key={i} className="text-xs">
@@ -576,8 +638,8 @@ export default function NetworkGlobe() {
       
       <div className="absolute bottom-4 left-4 text-xs text-[#00ff88] font-mono">
         <div>GLOBAL NETWORK: ACTIVE</div>
-        <div>NODES: {ALL_NODES.length - (badNode !== null ? 1 : 0)} HEALTHY / {ALL_NODES.length} TOTAL</div>
-        <div>SYSTEM: OPERATIONAL</div>
+        <div>NODES: {ALL_NODES.length - (rogueNodes.length || 0)} HEALTHY / {ALL_NODES.length} TOTAL</div>
+        <div>SYSTEM: {rogueNodes.length > 0 ? 'WARNING' : 'OPERATIONAL'}</div>
       </div>
     </div>
   );
