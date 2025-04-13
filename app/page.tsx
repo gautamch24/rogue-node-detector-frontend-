@@ -1,9 +1,21 @@
+"use client"
+
 import ClientWrapper from "@/components/client-wrapper"
 import NetworkGlobe from "@/components/network-globe"
 import NodeReport from "@/components/node-report"
 import StatusBar from "@/components/status-bar"
+import { useEffect } from "react"
 
 export default function Home() {
+  console.log("[Page] Home component rendering");
+  
+  useEffect(() => {
+    console.log("[Page] Home component mounted");
+    return () => {
+      console.log("[Page] Home component unmounting");
+    };
+  }, []);
+  
   return (
     <main className="relative flex min-h-screen flex-col bg-black text-white">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-gray-900 to-black"></div>

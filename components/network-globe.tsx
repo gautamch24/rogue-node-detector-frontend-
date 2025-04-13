@@ -3,6 +3,16 @@
 import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
+import { NODE_DATA, NodeData } from "@/lib/node-data"
+
+let GLOBE_INSTANCE_COUNT = 0;
+const GLOBE_DEBUG = true; // Enable detailed logging
+
+function debugLog(message: string) {
+  if (GLOBE_DEBUG) {
+    console.log(`[NetworkGlobe] ${message}`);
+  }
+}
 
 // Define regions with their coordinates and names
 const REGIONS = [
@@ -32,9 +42,16 @@ const generateNodesForRegion = (region: typeof REGIONS[0], count: number) => {
 const ALL_NODES = REGIONS.flatMap(region => generateNodesForRegion(region, 5));
 
 export default function NetworkGlobe() {
+  const uniqueId = useRef(`globe-${Math.random().toString(36).substr(2, 9)}`);
+  
+  debugLog(`Component rendered with ID: ${uniqueId.current}, GLOBE_INSTANCE_COUNT: ${GLOBE_INSTANCE_COUNT}`);
+  
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<{ name: string; position: THREE.Vector3 } | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<{ name: string; data: NodeData; position: THREE.Vector3 } | null>(null);
   const [badNode, setBadNode] = useState<number | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const instanceIdRef = useRef<number | null>(null);
 
   // Convert lat/lng to 3D coordinates
   const latLngToVector3 = (lat: number, lng: number, radius: number) => {
@@ -47,8 +64,32 @@ export default function NetworkGlobe() {
   };
 
   useEffect(() => {
-    if (!containerRef.current) return;
-
+    debugLog(`useEffect triggered for ID: ${uniqueId.current}, isInitialized: ${isInitialized}, instanceIdRef: ${instanceIdRef.current}, GLOBE_INSTANCE_COUNT: ${GLOBE_INSTANCE_COUNT}`);
+    
+    // If this component instance already has an ID, don't initialize again
+    if (instanceIdRef.current !== null) {
+      debugLog(`Instance ${uniqueId.current} already initialized with ID: ${instanceIdRef.current}, skipping initialization`);
+      return;
+    }
+    
+    // If container is not available, don't initialize
+    if (!containerRef.current) {
+      debugLog(`Container not available for ID: ${uniqueId.current}, skipping initialization`);
+      return;
+    }
+    
+    // If global instance count is already 1 or more, don't initialize this instance
+    if (GLOBE_INSTANCE_COUNT > 0) {
+      debugLog(`A NetworkGlobe instance is already running. Count: ${GLOBE_INSTANCE_COUNT}. Preventing duplicate initialization for ID: ${uniqueId.current}`);
+      return;
+    }
+    
+    // Increment global counter and assign ID to this instance
+    GLOBE_INSTANCE_COUNT++;
+    instanceIdRef.current = GLOBE_INSTANCE_COUNT;
+    debugLog(`Initializing globe for ID: ${uniqueId.current}, assigned instance #${instanceIdRef.current}, new count: ${GLOBE_INSTANCE_COUNT}`);
+    setIsInitialized(true);
+    
     // Basic Three.js setup
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -119,6 +160,86 @@ export default function NetworkGlobe() {
       regionMarkers.push(marker);
     });
 
+    // Create custom nodes from NODE_DATA
+    const customNodes: THREE.Mesh[] = [];
+    const nodeNameMap: Map<THREE.Mesh, string> = new Map();
+    
+    // Calculate positions for the custom nodes (distribute them around the globe)
+    Object.entries(NODE_DATA).forEach(([nodeName, nodeData], index) => {
+      // Calculate position on the globe
+      const totalNodes = Object.keys(NODE_DATA).length;
+      const angle = (index / totalNodes) * Math.PI * 2;
+      const randomOffset = Math.random() * 0.4 - 0.2; // Random offset for latitude
+      
+      // Distribute nodes around the equator with some variations
+      const lat = randomOffset * 50; // Latitude: -10 to 10 degrees
+      const lng = (angle * 180 / Math.PI) - 180; // Longitude: convert angle to -180 to 180
+      
+      // Create node marker
+      const nodeGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+      
+      // Determine color based on trustworthiness
+      const trustScore = nodeData.trustworthyScore;
+      let nodeColor;
+      if (trustScore >= 8) {
+        nodeColor = 0x00ff00; // Green for highly trustworthy
+      } else if (trustScore >= 6) {
+        nodeColor = 0xffff00; // Yellow for medium trustworthy
+      } else {
+        nodeColor = 0xff0000; // Red for less trustworthy
+      }
+      
+      const nodeMaterial = new THREE.MeshPhongMaterial({
+        color: nodeColor,
+        emissive: nodeColor,
+        emissiveIntensity: 0.5
+      });
+      
+      const nodeMesh = new THREE.Mesh(nodeGeometry, nodeMaterial);
+      nodeMesh.position.copy(latLngToVector3(lat, lng, 2.05)); // Position slightly above the globe
+      nodeMesh.userData = { nodeName };
+      scene.add(nodeMesh);
+      customNodes.push(nodeMesh);
+      nodeNameMap.set(nodeMesh, nodeName);
+      
+      // Add a label for the node
+      const textSprite = createTextSprite(nodeName, {
+        fontFace: 'Arial',
+        fontSize: 10,
+        borderColor: { r: 0, g: 0, b: 0, a: 1.0 },
+        backgroundColor: { r: 0, g: 0, b: 0, a: 0.8 },
+        textColor: { r: 255, g: 255, b: 255, a: 1.0 }
+      });
+      textSprite.position.copy(nodeMesh.position.clone().multiplyScalar(1.05));
+      scene.add(textSprite);
+    });
+    
+    // Function to create text sprite
+    function createTextSprite(text: string, parameters: any) {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d')!;
+      canvas.width = 400;
+      canvas.height = 200;
+      
+      context.font = "Bold " + parameters.fontSize + "px " + parameters.fontFace;
+      context.fillStyle = "rgba("+parameters.textColor.r+", "+parameters.textColor.g+", "+parameters.textColor.b+", 1.0)";
+      context.fillText(text, 10, 20);
+      
+      const texture = new THREE.Texture(canvas);
+      texture.needsUpdate = true;
+      
+      const spriteMaterial = new THREE.SpriteMaterial({ 
+        map: texture,
+        transparent: true,
+        opacity: 0.8
+      });
+      
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.scale.set(0.5, 0.25, 1.0);
+      
+      return sprite;
+    }
+    
     // Create nodes
     const nodes: THREE.Mesh[] = [];
     ALL_NODES.forEach((node, index) => {
@@ -223,7 +344,36 @@ export default function NetworkGlobe() {
         (mesh.material as THREE.MeshBasicMaterial).opacity = 0;
       });
       
-      // Check nodes intersection first
+      // Check custom nodes first
+      const customNodeIntersects = raycaster.intersectObjects(customNodes);
+      if (customNodeIntersects.length > 0) {
+        const nodeMesh = customNodeIntersects[0].object as THREE.Mesh;
+        const nodeName = nodeNameMap.get(nodeMesh);
+        
+        if (nodeName && NODE_DATA[nodeName]) {
+          // Update tooltip
+          const worldPos = new THREE.Vector3();
+          nodeMesh.getWorldPosition(worldPos);
+          worldPos.project(camera);
+          
+          const x = (worldPos.x * 0.5 + 0.5) * containerRef.current!.clientWidth;
+          const y = (-worldPos.y * 0.5 + 0.5) * containerRef.current!.clientHeight;
+          
+          setHoveredNode({
+            name: nodeName,
+            data: NODE_DATA[nodeName],
+            position: new THREE.Vector3(x, y, 0)
+          });
+          
+          setHoveredRegion(null); // Clear any region hover
+          return;
+        }
+      }
+      
+      // Clear node hover if no node is hovered
+      setHoveredNode(null);
+      
+      // If no custom nodes were hit, check normal nodes
       const nodeIntersects = raycaster.intersectObjects(nodes);
       if (nodeIntersects.length > 0) {
         const nodeMesh = nodeIntersects[0].object as THREE.Mesh;
@@ -304,6 +454,7 @@ export default function NetworkGlobe() {
     
     // Cleanup
     return () => {
+      debugLog(`Cleanup triggered for ID: ${uniqueId.current}, instance #${instanceIdRef.current}, GLOBE_INSTANCE_COUNT: ${GLOBE_INSTANCE_COUNT}`);
       window.removeEventListener('resize', handleResize);
       renderer.domElement.removeEventListener('mousemove', onMouseMove);
       clearInterval(simInterval);
@@ -328,11 +479,23 @@ export default function NetworkGlobe() {
       }
       
       renderer.dispose();
+      
+      // Decrement global counter on cleanup
+      GLOBE_INSTANCE_COUNT--;
+      debugLog(`Cleaned up globe for ID: ${uniqueId.current}, new count: ${GLOBE_INSTANCE_COUNT}`);
+      instanceIdRef.current = null;
     };
-  }, []);
+  }, [isInitialized]);
+  
+  // Helper function to format price display
+  const formatPrice = (price: number | null): string => {
+    if (price === null) return 'Free';
+    return `$${price.toFixed(2)}/hr`;
+  };
   
   return (
     <div 
+      id={`globe-container-${uniqueId.current}`}
       className="w-full h-full" 
       style={{ 
         position: 'absolute', 
@@ -340,11 +503,11 @@ export default function NetworkGlobe() {
         left: 0, 
         right: 0, 
         bottom: 0, 
-        minHeight: '600px' 
+        minHeight: '600px',
       }} 
       ref={containerRef}
     >
-      {hoveredRegion && (
+      {hoveredRegion && !hoveredNode && (
         <div 
           className="absolute z-10 bg-black/80 border border-[#00ff88] rounded-md p-2 text-xs font-mono pointer-events-none"
           style={{
@@ -358,6 +521,55 @@ export default function NetworkGlobe() {
           <div className="flex items-center gap-2">
             <span className="text-[#00ff88]">⚡</span>
             <span>{hoveredRegion.name}</span>
+          </div>
+        </div>
+      )}
+      
+      {hoveredNode && (
+        <div 
+          className="absolute z-10 bg-black/90 border border-gray-700 rounded-md p-3 text-xs font-mono pointer-events-none"
+          style={{
+            left: `${hoveredNode.position.x}px`,
+            top: `${hoveredNode.position.y + 20}px`,
+            transform: 'translate(-50%, 0)',
+            boxShadow: '0 0 20px rgba(0, 100, 255, 0.3)',
+            color: 'white',
+            maxWidth: '350px'
+          }}
+        >
+          <div className="flex flex-col gap-2">
+            <div className="text-lg font-bold border-b border-gray-700 pb-2 mb-2">{hoveredNode.name}</div>
+            
+            <div className="flex justify-between">
+              <span className="text-gray-400">Trustworthy Score:</span>
+              <span className={`font-bold ${
+                hoveredNode.data.trustworthyScore >= 8 ? 'text-green-500' : 
+                hoveredNode.data.trustworthyScore >= 6 ? 'text-yellow-500' : 'text-red-500'
+              }`}>
+                {hoveredNode.data.trustworthyScore.toFixed(1)}/10.0
+              </span>
+            </div>
+            
+            <div className="mt-2 border-t border-gray-700 pt-2">
+              <div className="text-sm font-bold mb-2">Available GPUs:</div>
+              <div className="grid grid-cols-1 gap-2">
+                {hoveredNode.data.gpus.map((gpu, idx) => (
+                  <div key={idx} className="bg-gray-900 p-2 rounded">
+                    <div className="font-bold text-blue-400">{gpu.model} ({gpu.VRAM})</div>
+                    <div className="text-xs text-gray-400">Socket: {gpu.socket}</div>
+                    <div className="text-xs text-gray-400">Agent: {gpu.agent}</div>
+                    <div className="mt-1 grid grid-cols-2 gap-1">
+                      {gpu.pricing.map((price, i) => (
+                        <div key={i} className="text-xs">
+                          <span className="text-gray-500">{price.type}:</span>{' '}
+                          <span className="font-bold text-green-400">{formatPrice(price.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
